@@ -15,7 +15,7 @@ fi
 
 
 if [[ ! -e /dev/net/tun ]]; then
-	echo "TUN/TAP is not available"
+	echo "TUN is not available"
 	exit 2
 fi
 
@@ -26,8 +26,14 @@ if grep -qs "CentOS release 5" "/etc/redhat-release"; then
 fi
 
 if [[ -e /etc/debian_version ]]; then
-	OS=debian
+	OS="debian"
+	#We get the version number, to verify we can get a recent version of OpenVPN
+	VERSION_ID=$(cat /etc/*-release | grep "VERSION_ID")
 	RCLOCAL='/etc/rc.local'
+	if [[ "$VERSION_ID" != 'VERSION_ID="7"' ]] && [[ "$VERSION_ID" != 'VERSION_ID="8"' ]] && [[ "$VERSION_ID" != 'VERSION_ID="12.04"' ]] && [[ "$VERSION_ID" != 'VERSION_ID="14.04"' ]] && [[ "$VERSION_ID" != 'VERSION_ID="15.10"' ]]; then
+		echo "Your version of Debian/Ubuntu is not supported. Please look at the documentation."
+		exit 4
+	fi
 elif [[ -e /etc/centos-release || -e /etc/redhat-release ]]; then
 	OS=centos
 	RCLOCAL='/etc/rc.d/rc.local'
@@ -50,11 +56,15 @@ newclient () {
 	echo "<key>" >> ~/$1.ovpn
 	cat /etc/openvpn/easy-rsa/pki/private/$1.key >> ~/$1.ovpn
 	echo "</key>" >> ~/$1.ovpn
+	echo "key-direction 1" >> ~/$1.ovpn
+	echo "<tls-auth>" >> ~/$1.ovpn
+	cat /etc/openvpn/tls-auth.key >> ~/$1.ovpn
+	echo "</tls-auth>" >> ~/$1.ovpn
 }
 
 
 # Try to get our IP from the system and fallback to the Internet.
-# I do this to make the script compatible with NATed servers (lowendspirit.com)
+# I do this to make the script compatible with NATed servers (LowEndSpirit/Scaleway)
 # and to avoid getting an IPv6.
 IP=$(ip addr | grep 'inet' | grep -v inet6 | grep -vE '127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | grep -o -E '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | head -1)
 if [[ "$IP" = "" ]]; then
@@ -109,16 +119,11 @@ if [[ -e /etc/openvpn/server.conf ]]; then
 			cd /etc/openvpn/easy-rsa/
 			./easyrsa --batch revoke $CLIENT
 			./easyrsa gen-crl
-			# And restart
-			if pgrep systemd-journal; then
-				systemctl restart openvpn@server.service
-			else
-				if [[ "$OS" = 'debian' ]]; then
-					/etc/init.d/openvpn restart
-				else
-					service openvpn restart
-				fi
-			fi
+			rm -rf pki/reqs/$CLIENT.req
+			rm -rf pki/private/$CLIENT.key
+			rm -rf pki/issued/$CLIENT.crt
+			rm -rf /etc/openvpn/crl.pem
+			cp /etc/openvpn/easy-rsa/pki/crl.pem /etc/openvpn/crl.pem
 			echo ""
 			echo "Certificate for client $CLIENT revoked"
 			exit
@@ -140,7 +145,14 @@ if [[ -e /etc/openvpn/server.conf ]]; then
 					sed -i "/iptables -I FORWARD -s 10.8.0.0\/24 -j ACCEPT/d" $RCLOCAL
 					sed -i "/iptables -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT/d" $RCLOCAL
 				fi
-				sed -i '/iptables -t nat -A POSTROUTING -s 10.8.0.0\/24 -j SNAT --to /d' $RCLOCAL
+				sed -i '/iptables -t nat -A POSTROUTING -s 10.8.0.0\/24 /d' $RCLOCAL
+				if hash sestatus 2>/dev/null; then
+					if sestatus | grep "Current mode" | grep -qs "enforcing"; then
+						if [[ "$PORT" != '1194' ]]; then
+							semanage port -d -t openvpn_port_t -p udp $PORT
+						fi
+					fi
+				fi
 				if [[ "$OS" = 'debian' ]]; then
 					apt-get remove --purge -y openvpn openvpn-blacklist
 				else
@@ -167,8 +179,18 @@ else
 	echo "I need to ask you a few questions before starting the setup"
 	echo "You can leave the default options and just press enter if you are ok with them"
 	echo ""
-	echo "First I need to know the IPv4 address of the network interface you want OpenVPN"
-	echo "listening to."
+	echo "First, choose which variant of the script you want to use."
+	echo '"Fast" is secure, but "slow" is the best encryption you can get, at the cost of speed (not that slow though)'
+	echo "   1) Fast (2048 bits RSA and DH, 128 bits AES)"
+	echo "   2) Slow (4096 bits RSA and DH, 256 bits AES)"
+	while [[ $VARIANT !=  "1" && $VARIANT != "2" ]]; do
+		read -p "Variant [1-2]: " -e -i 1 VARIANT
+	done
+	
+	echo ""
+	echo "I need to know the IPv4 address of the network interface you want OpenVPN listening to."
+	echo "If you server is running behind a NAT, (e.g. LowEndSpirit, Scaleway) leave the IP adress as it is. (local/private IP"
+	echo "Otherwise, it sould be your public IPv4 address."
 	read -p "IP address: " -e -i $IP IP
 	echo ""
 	echo "What port do you want for OpenVPN?"
@@ -176,12 +198,21 @@ else
 	echo ""
 	echo "What DNS do you want to use with the VPN?"
 	echo "   1) Current system resolvers"
-	echo "   2) OpenDNS"
-	echo "   3) Level 3"
-	echo "   4) NTT"
-	echo "   5) Hurricane Electric"
-	echo "   6) Google"
-	read -p "DNS [1-6]: " -e -i 1 DNS
+	echo "   2) FDN (recommended)"
+	echo "   3) OpenNIC (nearest servers)"
+	echo "   4) OpenDNS"
+	echo "   5) Google"
+	echo "   6) Verisign"
+	echo "   7) DNS.Watch"
+	read -p "DNS [1-7]: " -e -i 2 DNS
+	echo ""
+	echo "Some setups (e.g. Amazon Web Services), require use of MASQUERADE rather than SNAT"
+	echo "Which forwarding method do you want to use [if unsure, leave as default]?"
+	echo "   1) SNAT (default)"
+	echo "   2) MASQUERADE"
+	while [[ $FORWARD_TYPE !=  "1" && $FORWARD_TYPE != "2" ]]; do
+		read -p "Forwarding type: " -e -i 1 FORWARD_TYPE
+	done
 	echo ""
 	echo "Finally, tell me your name for the client cert"
 	echo "Please, use one word only, no special characters"
@@ -189,14 +220,42 @@ else
 	echo ""
 	echo "Okay, that was all I needed. We are ready to setup your OpenVPN server now"
 	read -n1 -r -p "Press any key to continue..."
-		if [[ "$OS" = 'debian' ]]; then
-		apt-get update
-		apt-get install openvpn iptables openssl ca-certificates -y
+	if [[ "$OS" = 'debian' ]]; then
+		apt-get install ca-certificates -y
+		# We add the OpenVPN repo to get the latest version.
+		# Debian 7
+		if [[ "$VERSION_ID" = 'VERSION_ID="7"' ]]; then
+			echo "deb http://swupdate.openvpn.net/apt wheezy main" > /etc/apt/sources.list.d/swupdate-openvpn.list
+			wget -O - https://swupdate.openvpn.net/repos/repo-public.gpg | apt-key add -
+			apt-get update
+		fi
+		# Debian 8
+		if [[ "$VERSION_ID" = 'VERSION_ID="8"' ]]; then
+			echo "deb http://swupdate.openvpn.net/apt jessie main" > /etc/apt/sources.list.d/swupdate-openvpn.list
+			wget -O - https://swupdate.openvpn.net/repos/repo-public.gpg | apt-key add -
+			apt update
+		fi
+		# Ubuntu 12.04
+		if [[ "$VERSION_ID" = 'VERSION_ID="12.04"' ]]; then
+			echo "deb http://swupdate.openvpn.net/apt precise main" > /etc/apt/sources.list.d/swupdate-openvpn.list
+			wget -O - https://swupdate.openvpn.net/repos/repo-public.gpg | apt-key add -
+			apt-get update
+		fi
+		# Ubuntu 14.04
+		if [[ "$VERSION_ID" = 'VERSION_ID="14.04"' ]]; then
+			echo "deb http://swupdate.openvpn.net/apt trusty main" > /etc/apt/sources.list.d/swupdate-openvpn.list
+			wget -O - https://swupdate.openvpn.net/repos/repo-public.gpg | apt-key add -
+			apt-get update
+		fi
+		# The repo, is not available for Ubuntu 15.10, but it has OpenVPN > 2.3.3, so we do nothing.
+		# The we install OpnVPN
+		apt-get install openvpn iptables openssl wget ca-certificates curl -y
 	else
 		# Else, the distro is CentOS
 		yum install epel-release -y
-		yum install openvpn iptables openssl wget ca-certificates -y
+		yum install openvpn iptables openssl wget ca-certificates curl -y
 	fi
+	
 	# An old version of easy-rsa was available by default in some openvpn packages
 	if [[ -d /etc/openvpn/easy-rsa/ ]]; then
 		rm -rf /etc/openvpn/easy-rsa/
@@ -209,6 +268,18 @@ else
 	chown -R root:root /etc/openvpn/easy-rsa/
 	rm -rf ~/EasyRSA-3.0.1.tgz
 	cd /etc/openvpn/easy-rsa/
+	# If the user selected the fast, less hardened version
+	if [[ "$VARIANT" = '1' ]]; then
+		echo "set_var EASYRSA_KEY_SIZE 2048
+set_var EASYRSA_KEY_SIZE 2048
+set_var EASYRSA_DIGEST "sha256"" > vars
+	fi
+	# If the user selected the relatively slow, ultra hardened version
+	if [[ "$VARIANT" = '2' ]]; then
+		echo "set_var EASYRSA_KEY_SIZE 4096
+set_var EASYRSA_KEY_SIZE 4096
+set_var EASYRSA_DIGEST "sha384"" > vars
+	fi
 	# Create the PKI, set up the CA, the DH params and the server + client certificates
 	./easyrsa init-pki
 	./easyrsa --batch build-ca nopass
@@ -216,21 +287,36 @@ else
 	./easyrsa build-server-full server nopass
 	./easyrsa build-client-full $CLIENT nopass
 	./easyrsa gen-crl
+	# generate tls-auth key
+	openvpn --genkey --secret /etc/openvpn/tls-auth.key
 	# Move the stuff we need
-	cp pki/ca.crt pki/private/ca.key pki/dh.pem pki/issued/server.crt pki/private/server.key /etc/openvpn
+	cp pki/ca.crt pki/private/ca.key pki/dh.pem pki/issued/server.crt pki/private/server.key /etc/openvpn/easy-rsa/pki/crl.pem /etc/openvpn
+	# Make cert revocation list readable for non-root
+	chmod 644 /etc/openvpn/crl.pem
 	# Generate server.conf
 	echo "port $PORT
 proto udp
 dev tun
-sndbuf 0
-rcvbuf 0
 ca ca.crt
 cert server.crt
 key server.key
 dh dh.pem
+user nobody
+group nogroup
 topology subnet
 server 10.8.0.0 255.255.255.0
-ifconfig-pool-persist ipp.txt" > /etc/openvpn/server.conf
+ifconfig-pool-persist ipp.txt
+cipher AES-256-CBC
+auth SHA512
+tls-version-min 1.2" > /etc/openvpn/server.conf
+	if [[ "$VARIANT" = '1' ]]; then
+		# If the user selected the fast, less hardened version
+		# iOS OpenVPN connect doesn't support GCM or SHA256; use next best
+		echo "tls-cipher TLS-DHE-RSA-WITH-AES-128-CBC-SHA" >> /etc/openvpn/server.conf
+	elif [[ "$VARIANT" = '2' ]]; then
+		# If the user selected the relatively slow, ultra hardened version
+		echo "tls-cipher TLS-DHE-RSA-WITH-AES-256-GCM-SHA384" >> /etc/openvpn/server.conf
+	fi
 	echo 'push "redirect-gateway def1 bypass-dhcp"' >> /etc/openvpn/server.conf
 	# DNS
 	case $DNS in
@@ -240,33 +326,39 @@ ifconfig-pool-persist ipp.txt" > /etc/openvpn/server.conf
 			echo "push \"dhcp-option DNS $line\"" >> /etc/openvpn/server.conf
 		done
 		;;
-		2)
+		2) #FDN
+		echo 'push "dhcp-option DNS 80.67.169.12"' >> /etc/openvpn/server.conf
+		echo 'push "dhcp-option DNS 80.67.169.40"' >> /etc/openvpn/server.conf
+		;;
+		3) #OpenNIC
+		#Getting the nearest OpenNIC servers using the geoip API
+		read ns1 ns2 <<< $(curl -s https://api.opennicproject.org/geoip/ | head -2 | awk '{print $1}')
+		echo "push \"dhcp-option DNS $ns1\"" >> /etc/openvpn/server.conf
+		echo "push \"dhcp-option DNS $ns2\"" >> /etc/openvpn/server.conf
+		;;
+		4) #OpenDNS 
 		echo 'push "dhcp-option DNS 208.67.222.222"' >> /etc/openvpn/server.conf
 		echo 'push "dhcp-option DNS 208.67.220.220"' >> /etc/openvpn/server.conf
 		;;
-		3) 
-		echo 'push "dhcp-option DNS 4.2.2.2"' >> /etc/openvpn/server.conf
-		echo 'push "dhcp-option DNS 4.2.2.4"' >> /etc/openvpn/server.conf
-		;;
-		4) 
-		echo 'push "dhcp-option DNS 129.250.35.250"' >> /etc/openvpn/server.conf
-		echo 'push "dhcp-option DNS 129.250.35.251"' >> /etc/openvpn/server.conf
-		;;
-		5) 
-		echo 'push "dhcp-option DNS 74.82.42.42"' >> /etc/openvpn/server.conf
-		;;
-		6) 
+		5) #Google 
 		echo 'push "dhcp-option DNS 8.8.8.8"' >> /etc/openvpn/server.conf
 		echo 'push "dhcp-option DNS 8.8.4.4"' >> /etc/openvpn/server.conf
 		;;
+		6) #Verisign
+		echo 'push "dhcp-option DNS 64.6.64.6"' >> /etc/openvpn/server.conf
+		echo 'push "dhcp-option DNS 64.6.65.6"' >> /etc/openvpn/server.conf
+		;;
+		7) #DNS.Watch
+		echo 'push "dhcp-option DNS 84.200.69.80"' >> /etc/openvpn/server.conf
+		echo 'push "dhcp-option DNS 84.200.70.40"' >> /etc/openvpn/server.conf
+		;;
 	esac
 	echo "keepalive 10 120
-comp-lzo
 persist-key
 persist-tun
-status openvpn-status.log
-verb 3
-crl-verify /etc/openvpn/easy-rsa/pki/crl.pem" >> /etc/openvpn/server.conf
+crl-verify crl.pem
+tls-server
+tls-auth tls-auth.key 0" >> /etc/openvpn/server.conf
 	# Enable net.ipv4.ip_forward for the system
 	if [[ "$OS" = 'debian' ]]; then
 		sed -i 's|#net.ipv4.ip_forward=1|net.ipv4.ip_forward=1|' /etc/sysctl.conf
@@ -281,8 +373,13 @@ crl-verify /etc/openvpn/easy-rsa/pki/crl.pem" >> /etc/openvpn/server.conf
 	# Avoid an unneeded reboot
 	echo 1 > /proc/sys/net/ipv4/ip_forward
 	# Set NAT for the VPN subnet
-	iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -j SNAT --to $IP
-	sed -i "1 a\iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -j SNAT --to $IP" $RCLOCAL
+	if [[ "$FORWARD_TYPE" = '1' ]]; then
+		iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -j SNAT --to $IP
+		sed -i "1 a\iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -j SNAT --to $IP" $RCLOCAL
+	else
+		iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o eth0 -j MASQUERADE
+		sed -i "1 a\iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o eth0 -j MASQUERADE" $RCLOCAL
+	fi
 	if pgrep firewalld; then
 		# We don't use --add-service=openvpn because that would only work with
 		# the default port. Using both permanent and not permanent rules to
@@ -303,6 +400,18 @@ crl-verify /etc/openvpn/easy-rsa/pki/crl.pem" >> /etc/openvpn/server.conf
 		sed -i "1 a\iptables -I FORWARD -s 10.8.0.0/24 -j ACCEPT" $RCLOCAL
 		sed -i "1 a\iptables -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT" $RCLOCAL
 	fi
+	# If SELinux is enabled and a custom port was selected, we need this
+	if hash sestatus 2>/dev/null; then
+		if sestatus | grep "Current mode" | grep -qs "enforcing"; then
+			if [[ "$PORT" != '1194' ]]; then
+				# semanage isn't available in CentOS 6 by default
+				if ! hash semanage 2>/dev/null; then
+					yum install policycoreutils-python -y
+				fi
+				semanage port -a -t openvpn_port_t -p udp $PORT
+			fi
+		fi
+	fi
 	# And finally, restart OpenVPN
 	if [[ "$OS" = 'debian' ]]; then
 		# Little hack to check for systemd
@@ -320,13 +429,13 @@ crl-verify /etc/openvpn/easy-rsa/pki/crl.pem" >> /etc/openvpn/server.conf
 			chkconfig openvpn on
 		fi
 	fi
-	# Try to detect a NATed connection and ask about it to potential LowEndSpirit users
+	# Try to detect a NATed connection and ask about it to potential LowEndSpirit/Scaleway users
 	EXTERNALIP=$(wget -qO- ipv4.icanhazip.com)
 	if [[ "$IP" != "$EXTERNALIP" ]]; then
 		echo ""
 		echo "Looks like your server is behind a NAT!"
 		echo ""
-		echo "If your server is NATed (LowEndSpirit), I need to know the external IP"
+		echo "If your server is NATed (e.g. LowEndSpirit, Scaleway), I need to know the external IP"
 		echo "If that's not the case, just ignore this and leave the next field blank"
 		read -p "External IP: " -e USEREXTERNALIP
 		if [[ "$USEREXTERNALIP" != "" ]]; then
@@ -337,16 +446,23 @@ crl-verify /etc/openvpn/easy-rsa/pki/crl.pem" >> /etc/openvpn/server.conf
 	echo "client
 dev tun
 proto udp
-sndbuf 0
-rcvbuf 0
 remote $IP $PORT
 resolv-retry infinite
 nobind
 persist-key
 persist-tun
 remote-cert-tls server
-comp-lzo
-verb 3" > /etc/openvpn/client-common.txt
+cipher AES-256-CBC
+auth SHA512
+tls-version-min 1.2
+tls-client" > /etc/openvpn/client-common.txt
+	if [[ "$VARIANT" = '1' ]]; then
+		# If the user selected the fast, less hardened version
+		echo "tls-cipher TLS-DHE-RSA-WITH-AES-128-CBC-SHA" >> /etc/openvpn/client-common.txt
+	elif [[ "$VARIANT" = '2' ]]; then
+		# If the user selected the relatively slow, ultra hardened version
+		echo "tls-cipher TLS-DHE-RSA-WITH-AES-256-GCM-SHA384" >> /etc/openvpn/client-common.txt
+	fi
 	# Generates the custom client.ovpn
 	newclient "$CLIENT"
 	echo ""

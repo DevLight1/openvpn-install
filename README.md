@@ -67,8 +67,7 @@ chmod +x openvpn-install.sh
 Once it ends, you can run it again to add more users, remove some of them or even completely uninstall OpenVPN.
 
 
-You can get a cheap VPS for 2€/month at [PulseHeberg](http://manager.pulseheberg.com/aff.php?aff=1204
-).
+You can get a cheap VPS yearly at [VirtWire](https://my.virtwire.com/aff.php?aff=97).
 
 ## Licence
 

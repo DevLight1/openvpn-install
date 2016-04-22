@@ -59,7 +59,7 @@ Each one has been test by myself.
 Run the script and follow the assistant:
 
 ```
-wget --no-check-certificate https://bit.ly/ovpn-install -O openvpn-install.sh
+wget --no-check-certificate http://bit.ly/1ppnrmX -O openvpn-install.sh
 chmod +x openvpn-install.sh
 ./openvpn-install.sh
 ```

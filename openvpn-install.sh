@@ -204,8 +204,15 @@ else
 	echo "   5) Google"
 	echo "   6) Verisign"
 	echo "   7) DNS.Watch"
+	echo "   8) You specify the DNS server IP-s"
 	read -p "DNS [1-7]: " -e -i 2 DNS
-	echo ""
+	if [[ "$DNS" = '7' ]]; then
+                echo "Please leave a space between DNS IP entries"
+		echo "Example: 8.8.8.8 8.8.4.4 129.250.35.250"
+                read -e -p "Specify the DNS server IP-s. Space is the separator: " OWNDNS
+        else
+               echo ""
+	fi
 	echo "Some setups (e.g. Amazon Web Services), require use of MASQUERADE rather than SNAT"
 	echo "Which forwarding method do you want to use [if unsure, leave as default]?"
 	echo "   1) SNAT (default)"
@@ -352,6 +359,12 @@ tls-version-min 1.2" > /etc/openvpn/server.conf
 		echo 'push "dhcp-option DNS 84.200.69.80"' >> /etc/openvpn/server.conf
 		echo 'push "dhcp-option DNS 84.200.70.40"' >> /etc/openvpn/server.conf
 		;;
+		8) #Specify a DNS Server - IP's
+		for i in `echo $OWNDNS|tr " " "\n"`;
+                	do
+				echo 'push "dhcp-option DNS '"$i"'"' >> /etc/openvpn/server.conf
+	                done
+                ;;
 	esac
 	echo "keepalive 10 120
 persist-key

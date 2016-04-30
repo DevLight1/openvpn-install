@@ -373,7 +373,7 @@ crl-verify crl.pem
 tls-server
 tls-auth tls-auth.key 0
 status openvpn-status.log
-max-clients 12
+max-clients 15
 verb 3" >> /etc/openvpn/server.conf
 	# Enable net.ipv4.ip_forward for the system
 	if [[ "$OS" = 'debian' ]]; then

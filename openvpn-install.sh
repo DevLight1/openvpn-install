@@ -183,8 +183,9 @@ else
 	echo '"Fast" is secure, but "slow" is the best encryption you can get, at the cost of speed (not that slow though)'
 	echo "   1) Fast (2048 bits RSA and DH, 128 bits AES)"
 	echo "   2) Slow (4096 bits RSA and DH, 256 bits AES)"
-	while [[ $VARIANT !=  "1" && $VARIANT != "2" ]]; do
-		read -p "Variant [1-2]: " -e -i 1 VARIANT
+	echo "   3) Slow (8192 bits RSA and DH, 512 bits AES)"
+	while [[ $VARIANT !=  "1" && $VARIANT != "2" && $VARIANT != "3"  ]]; do
+		read -p "Variant [1-3]: " -e -i 1 VARIANT
 	done
 	
 	echo ""
@@ -286,6 +287,11 @@ set_var EASYRSA_DIGEST "sha256"" > vars
 		echo "set_var EASYRSA_KEY_SIZE 4096
 set_var EASYRSA_KEY_SIZE 4096
 set_var EASYRSA_DIGEST "sha384"" > vars
+	fi
+	if [[ "$VARIANT" = '3' ]]; then
+		echo "set_var EASYRSA_KEY_SIZE 8192
+set_var EASYRSA_KEY_SIZE 8912
+set_var EASYRSA_DIGEST "sha512"" > vars
 	fi
 	# Create the PKI, set up the CA, the DH params and the server + client certificates
 	./easyrsa init-pki

@@ -182,7 +182,7 @@ else
 	echo "First, choose which variant of the script you want to use."
 	echo '"Fast" is secure, but "slow" is the best encryption you can get, at the cost of speed (not that slow though)'
 	echo "   1) Fast (2048 bits RSA and DH, 128 bits AES)"
-	echo "   2) Slow (4096 bits RSA and DH, 256 bits AES)"
+	echo "   2) Normal (4096 bits RSA and DH, 256 bits AES)"
 	echo "   3) Slow (8192 bits RSA and DH, 512 bits AES)"
 	while [[ $VARIANT !=  "1" && $VARIANT != "2" && $VARIANT != "3"  ]]; do
 		read -p "Variant [1-3]: " -e -i 1 VARIANT

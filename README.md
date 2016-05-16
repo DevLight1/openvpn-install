@@ -9,7 +9,7 @@ This fork includes :
 - No comp-lzo [compression is a vector for oracle attacks, e.g. CRIME or BREACH](https://github.com/BetterCrypto/Applied-Crypto-Hardening/pull/91#issuecomment-75388575)
 - Better encryption (see below)
 - TLS 1.2 only
-- AES-256-CBC and SHA-512 for HMAC (instead of BF-128-CBC and SHA1)
+- AES-192-CBC by default and SHA-512 for HMAC (instead of BF-128-CBC and SHA1)
 - Run server in unprivileged mode, reducing risks to the system
 - TLS-auth to help [thwart DoS attacks](https://openvpn.net/index.php/open-source/documentation/howto.html#security) and provide a 2nd line of defense to the TLS channel.
 - [Perfect forward secrecy](http://en.wikipedia.org/wiki/Forward_secrecy)

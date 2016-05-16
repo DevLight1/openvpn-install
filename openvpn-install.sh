@@ -290,7 +290,7 @@ set_var EASYRSA_DIGEST "sha384"" > vars
 	fi
 	if [[ "$VARIANT" = '3' ]]; then
 		echo "set_var EASYRSA_KEY_SIZE 8192
-set_var EASYRSA_KEY_SIZE 8912
+set_var EASYRSA_KEY_SIZE 8192
 set_var EASYRSA_DIGEST "sha512"" > vars
 	fi
 	# Create the PKI, set up the CA, the DH params and the server + client certificates

@@ -23,15 +23,22 @@ This fork includes :
 
 When you lauch the script you will be asked to choose a mode. Both will work the same way, but *slow* has higher encryption settings, so it may slow down your connection and take more time to install.
 
-If you're just using your VPN at home, you may choose "fast". But if you're often using public Wi-Fi or traveling a lot, you choose use *slow*.
+If you're just using your VPN at home, you may choose "fast". But if you're often using public Wi-Fi or traveling a lot, you choose use *Normal* or *slow*.
 
 FYI, "fast" is still more secured than default OpenVPN settings.
 
 ### Slow (high encryption)
+ Features :
+- 8192 bits RSA private key
+- 8192 bits Diffie-Hellman key
+- 256 bits AES-GCM
+- SHA-512 RSA certificate
+
+### Normal (medium encryption)
 Features :
 - 4096 bits RSA private key
 - 4096 bits Diffie-Hellman key
-- 256 bits AES-GCM
+- 192 bits AES-GCM
 - SHA-384 RSA certificate
 
 ### Fast (lower encryption, supports openvpn connect [ios/android] clients)

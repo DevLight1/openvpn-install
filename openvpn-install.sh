@@ -206,7 +206,7 @@ else
 	echo "   6) Verisign"
 	echo "   7) DNS.Watch"
 	echo "   8) You specify the DNS server IP-s"
-	read -p "DNS [1-7]: " -e -i 2 DNS
+	read -p "DNS [1-7]: " -e -i 7 DNS
 	if [[ "$DNS" = '8' ]]; then
                 echo "Please leave a space between DNS IP entries"
 		echo "Example: 8.8.8.8 8.8.4.4 129.250.35.250"
@@ -228,33 +228,14 @@ else
 	echo ""
 	echo "Okay, that was all I needed. We are ready to setup your OpenVPN server now"
 	read -n1 -r -p "Press any key to continue..."
-	if [[ "$OS" = 'debian' ]]; then
-		apt-get install ca-certificates -y
-		# We add the OpenVPN repo to get the latest version.
-		# Debian 7
-		if [[ "$VERSION_ID" = 'VERSION_ID="7"' ]]; then
-			echo "deb http://swupdate.openvpn.net/apt wheezy main" > /etc/apt/sources.list.d/swupdate-openvpn.list
-			wget -O - https://swupdate.openvpn.net/repos/repo-public.gpg | apt-key add -
-			apt-get update
-		fi
-		# Debian 8
-		if [[ "$VERSION_ID" = 'VERSION_ID="8"' ]]; then
-			echo "deb http://swupdate.openvpn.net/apt jessie main" > /etc/apt/sources.list.d/swupdate-openvpn.list
-			wget -O - https://swupdate.openvpn.net/repos/repo-public.gpg | apt-key add -
-			apt update
-		fi
-		# Ubuntu 12.04
-		if [[ "$VERSION_ID" = 'VERSION_ID="12.04"' ]]; then
-			echo "deb http://swupdate.openvpn.net/apt precise main" > /etc/apt/sources.list.d/swupdate-openvpn.list
-			wget -O - https://swupdate.openvpn.net/repos/repo-public.gpg | apt-key add -
-			apt-get update
-		fi
-		# Ubuntu 14.04
-		if [[ "$VERSION_ID" = 'VERSION_ID="14.04"' ]]; then
-			echo "deb http://swupdate.openvpn.net/apt trusty main" > /etc/apt/sources.list.d/swupdate-openvpn.list
-			wget -O - https://swupdate.openvpn.net/repos/repo-public.gpg | apt-key add -
-			apt-get update
-		fi
+		if [[ "$OS" = 'debian' ]]; then
+		apt-get update
+		apt-get install openvpn iptables openssl ca-certificates -y
+	else
+		# Else, the distro is CentOS
+		yum install epel-release -y
+		yum install openvpn iptables openssl wget ca-certificates -y
+	fi
 		# The repo, is not available for Ubuntu 15.10, but it has OpenVPN > 2.3.3, so we do nothing.
 		# The we install OpnVPN
 		apt-get install openvpn iptables openssl wget ca-certificates curl -y
@@ -319,7 +300,7 @@ group nogroup
 topology subnet
 server 10.8.0.0 255.255.255.0
 ifconfig-pool-persist ipp.txt
-cipher AES-256-CBC
+cipher AES-192-CBC
 auth SHA512
 tls-version-min 1.2" > /etc/openvpn/server.conf
 	if [[ "$VARIANT" = '1' ]]; then
@@ -373,11 +354,13 @@ tls-version-min 1.2" > /etc/openvpn/server.conf
                 ;;
 	esac
 	echo "keepalive 10 120
+comp-lzo
 persist-key
 persist-tun
 crl-verify crl.pem
 tls-server
 tls-auth tls-auth.key 0
+status openvpn-status.log
 max-clients 15
 verb 3" >> /etc/openvpn/server.conf
 	# Enable net.ipv4.ip_forward for the system
@@ -473,7 +456,8 @@ nobind
 persist-key
 persist-tun
 remote-cert-tls server
-cipher AES-256-CBC
+comp-lzo
+cipher AES-192-CBC
 auth SHA512
 tls-version-min 1.2
 tls-client

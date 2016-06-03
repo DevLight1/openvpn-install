@@ -27,6 +27,7 @@ fi
 
 if [[ -e /etc/debian_version ]]; then
 	OS="debian"
+	 GROUPNAME=nogroup
 	#We get the version number, to verify we can get a recent version of OpenVPN
 	VERSION_ID=$(cat /etc/*-release | grep "VERSION_ID")
 	RCLOCAL='/etc/rc.local'
@@ -36,6 +37,7 @@ if [[ -e /etc/debian_version ]]; then
 	fi
 elif [[ -e /etc/centos-release || -e /etc/redhat-release ]]; then
 	OS=centos
+	GROUPNAME=nobody
 	RCLOCAL='/etc/rc.d/rc.local'
 	# Needed for CentOS 7
 	chmod +x /etc/rc.d/rc.local
@@ -124,6 +126,8 @@ if [[ -e /etc/openvpn/server.conf ]]; then
 			rm -rf pki/issued/$CLIENT.crt
 			rm -rf /etc/openvpn/crl.pem
 			cp /etc/openvpn/easy-rsa/pki/crl.pem /etc/openvpn/crl.pem
+			 # CRL is read with each client connection, when OpenVPN is dropped to nobody
+			chown nobody:$GROUPNAME /etc/openvpn/crl.pem
 			echo ""
 			echo "Certificate for client $CLIENT revoked"
 			exit
@@ -179,11 +183,10 @@ else
 	echo "I need to ask you a few questions before starting the setup"
 	echo "You can leave the default options and just press enter if you are ok with them"
 	echo ""
-	echo "First, choose which variant of the script you want to use."
-	echo '"Fast" is secure, but "slow" is the best encryption you can get, at the cost of speed (not that slow though)'
-	echo "   1) Fast (2048 bits RSA and DH, 128 bits AES)"
-	echo "   2) Normal (4096 bits RSA and DH, 256 bits AES)"
-	echo "   3) Slow (8192 bits RSA and DH, 512 bits AES)"
+	echo "First, choose which level of encryption you want to use."
+	echo "   1) Low Encryption (2048 bits RSA and DH, SHA-256 certificate)"
+	echo "   2) Medium Encryption (4096 bits RSA and DH, SHA-384 certificate)"
+	echo "   3) High Encryption (8192 bits RSA and DH, SHA-512 certificate)"
 	while [[ $VARIANT !=  "1" && $VARIANT != "2" && $VARIANT != "3"  ]]; do
 		read -p "Variant [1-3]: " -e -i 1 VARIANT
 	done
@@ -199,7 +202,7 @@ else
 	echo ""
 	echo "What DNS do you want to use with the VPN?"
 	echo "   1) Current system resolvers"
-	echo "   2) FDN (recommended)"
+	echo "   2) FDN"
 	echo "   3) OpenNIC (nearest servers)"
 	echo "   4) OpenDNS"
 	echo "   5) Google"
@@ -228,14 +231,33 @@ else
 	echo ""
 	echo "Okay, that was all I needed. We are ready to setup your OpenVPN server now"
 	read -n1 -r -p "Press any key to continue..."
-		if [[ "$OS" = 'debian' ]]; then
-		apt-get update
-		apt-get install openvpn iptables openssl ca-certificates -y
-	else
-		# Else, the distro is CentOS
-		yum install epel-release -y
-		yum install openvpn iptables openssl wget ca-certificates -y
-	fi
+	if [[ "$OS" = 'debian' ]]; then
+		apt-get install ca-certificates -y
+		# We add the OpenVPN repo to get the latest version.
+		# Debian 7
+		if [[ "$VERSION_ID" = 'VERSION_ID="7"' ]]; then
+			echo "deb http://swupdate.openvpn.net/apt wheezy main" > /etc/apt/sources.list.d/swupdate-openvpn.list
+			wget -O - https://swupdate.openvpn.net/repos/repo-public.gpg | apt-key add -
+			apt-get update
+		fi
+		# Debian 8
+		if [[ "$VERSION_ID" = 'VERSION_ID="8"' ]]; then
+			echo "deb http://swupdate.openvpn.net/apt jessie main" > /etc/apt/sources.list.d/swupdate-openvpn.list
+			wget -O - https://swupdate.openvpn.net/repos/repo-public.gpg | apt-key add -
+			apt update
+		fi
+		# Ubuntu 12.04
+		if [[ "$VERSION_ID" = 'VERSION_ID="12.04"' ]]; then
+			echo "deb http://swupdate.openvpn.net/apt precise main" > /etc/apt/sources.list.d/swupdate-openvpn.list
+			wget -O - https://swupdate.openvpn.net/repos/repo-public.gpg | apt-key add -
+			apt-get update
+		fi
+		# Ubuntu 14.04
+		if [[ "$VERSION_ID" = 'VERSION_ID="14.04"' ]]; then
+			echo "deb http://swupdate.openvpn.net/apt trusty main" > /etc/apt/sources.list.d/swupdate-openvpn.list
+			wget -O - https://swupdate.openvpn.net/repos/repo-public.gpg | apt-key add -
+			apt-get update
+		fi
 		# The repo, is not available for Ubuntu 15.10, but it has OpenVPN > 2.3.3, so we do nothing.
 		# The we install OpnVPN
 		apt-get install openvpn iptables openssl wget ca-certificates curl -y
@@ -244,7 +266,6 @@ else
 		yum install epel-release -y
 		yum install openvpn iptables openssl wget ca-certificates curl -y
 	fi
-	
 	# An old version of easy-rsa was available by default in some openvpn packages
 	if [[ -d /etc/openvpn/easy-rsa/ ]]; then
 		rm -rf /etc/openvpn/easy-rsa/
@@ -257,21 +278,16 @@ else
 	chown -R root:root /etc/openvpn/easy-rsa/
 	rm -rf ~/EasyRSA-3.0.1.tgz
 	cd /etc/openvpn/easy-rsa/
-	# If the user selected the fast, less hardened version
 	if [[ "$VARIANT" = '1' ]]; then
 		echo "set_var EASYRSA_KEY_SIZE 2048
-set_var EASYRSA_KEY_SIZE 2048
 set_var EASYRSA_DIGEST "sha256"" > vars
 	fi
-	# If the user selected the relatively slow, ultra hardened version
 	if [[ "$VARIANT" = '2' ]]; then
 		echo "set_var EASYRSA_KEY_SIZE 4096
-set_var EASYRSA_KEY_SIZE 4096
 set_var EASYRSA_DIGEST "sha384"" > vars
 	fi
 	if [[ "$VARIANT" = '3' ]]; then
 		echo "set_var EASYRSA_KEY_SIZE 8192
-set_var EASYRSA_KEY_SIZE 8192
 set_var EASYRSA_DIGEST "sha512"" > vars
 	fi
 	# Create the PKI, set up the CA, the DH params and the server + client certificates
@@ -285,6 +301,8 @@ set_var EASYRSA_DIGEST "sha512"" > vars
 	openvpn --genkey --secret /etc/openvpn/tls-auth.key
 	# Move the stuff we need
 	cp pki/ca.crt pki/private/ca.key pki/dh.pem pki/issued/server.crt pki/private/server.key /etc/openvpn/easy-rsa/pki/crl.pem /etc/openvpn
+	# CRL is read with each client connection, when OpenVPN is dropped to nobody
+	chown nobody:$GROUPNAME /etc/openvpn/crl.pem
 	# Make cert revocation list readable for non-root
 	chmod 644 /etc/openvpn/crl.pem
 	# Generate server.conf
@@ -302,15 +320,8 @@ server 10.8.0.0 255.255.255.0
 ifconfig-pool-persist ipp.txt
 cipher AES-192-CBC
 auth SHA512
-tls-version-min 1.2" > /etc/openvpn/server.conf
-	if [[ "$VARIANT" = '1' ]]; then
-		# If the user selected the fast, less hardened version
-		# iOS 8 OpenVPN connect doesn't support GCM or SHA256; use next best
-		echo "tls-cipher TLS-DHE-RSA-WITH-AES-128-GCM-SHA256:TLS-DHE-RSA-WITH-AES-128-CBC-SHA" >> /etc/openvpn/server.conf
-	elif [[ "$VARIANT" = '2' ]]; then
-		# If the user selected the relatively slow, ultra hardened version
-		echo "tls-cipher TLS-DHE-RSA-WITH-AES-256-GCM-SHA384" >> /etc/openvpn/server.conf
-	fi
+tls-version-min 1.2
+tls-cipher TLS-DHE-RSA-WITH-AES-256-GCM-SHA384" > /etc/openvpn/server.conf
 	echo 'push "redirect-gateway def1 bypass-dhcp"' >> /etc/openvpn/server.conf
 	# DNS
 	case $DNS in
@@ -355,14 +366,14 @@ tls-version-min 1.2" > /etc/openvpn/server.conf
 	esac
 	echo "keepalive 10 120
 comp-lzo
+user nobody
+group $GROUPNAME
 persist-key
 persist-tun
 crl-verify crl.pem
 tls-server
 tls-auth tls-auth.key 0
-status openvpn-status.log
-max-clients 15
-verb 3" >> /etc/openvpn/server.conf
+max-clients 5" >> /etc/openvpn/server.conf
 	# Enable net.ipv4.ip_forward for the system
 	if [[ "$OS" = 'debian' ]]; then
 		sed -i 's|#net.ipv4.ip_forward=1|net.ipv4.ip_forward=1|' /etc/sysctl.conf
@@ -457,18 +468,12 @@ persist-key
 persist-tun
 remote-cert-tls server
 comp-lzo
+setenv opt block-outside-dns
 cipher AES-192-CBC
 auth SHA512
 tls-version-min 1.2
 tls-client
-verb 3" > /etc/openvpn/client-common.txt
-	if [[ "$VARIANT" = '1' ]]; then
-		# If the user selected the fast, less hardened version
-		echo "tls-cipher TLS-DHE-RSA-WITH-AES-128-GCM-SHA256:TLS-DHE-RSA-WITH-AES-128-CBC-SHA" >> /etc/openvpn/client-common.txt
-	elif [[ "$VARIANT" = '2' ]]; then
-		# If the user selected the relatively slow, ultra hardened version
-		echo "tls-cipher TLS-DHE-RSA-WITH-AES-256-GCM-SHA384" >> /etc/openvpn/client-common.txt
-	fi
+tls-cipher TLS-DHE-RSA-WITH-AES-256-GCM-SHA384" > /etc/openvpn/client-common.txt
 	# Generates the custom client.ovpn
 	newclient "$CLIENT"
 	echo ""
